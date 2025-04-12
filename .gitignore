@@ -1,0 +1,5 @@
+# Bin folders
+/bin
+
+# Intellij
+.idea/
