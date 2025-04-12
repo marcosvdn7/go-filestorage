@@ -37,5 +37,9 @@ func (t *TCPTransport) starAcceptLoop() {
 			fmt.Printf("TCP accept loop error: %s\n", err)
 		}
 
+		if err = conn.Close(); err != nil {
+			fmt.Printf("TCP conn close error: %s\n", err)
+		}
+
 	}
 }
