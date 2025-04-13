@@ -3,25 +3,66 @@ package p2p
 import (
 	"fmt"
 	"net"
-	"sync"
 )
 
-type TCPTransport struct {
-	listenAddress string
-	listener      net.Listener
+// TCPPeer represents the remote node over a TCP established connection
+type TCPPeer struct {
+	// Underlying connection of the peer
+	conn net.Conn
 
-	mu    sync.RWMutex
-	peers map[net.Addr]Peer
+	// If we dial and retrieve a connection => outbound == true
+	// If we and accept and retrieve a connection => outbound == false
+	outbound bool
 }
 
-func NewTCPTransport(listenAddress string) *TCPTransport {
+// Close implements the peer interface
+func (tp *TCPPeer) Close() error {
+	return tp.conn.Close()
+}
+
+// NewTCPPeer initialize peer with connection and outbound
+func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
+	return &TCPPeer{conn, outbound}
+}
+
+type TCPTransportOpts struct {
+	// Address which the transporter is going to listen from
+	ListenAddress string
+	// Func responsible to check if everything is fine with the connection
+	HandshakeFunc HandshakeFunc
+	// Responsible to decode the data we receive through the connection
+	Decoder Decoder
+	OnPeer  func(peer Peer) error
+}
+
+// TCPTransport contains info and functions to handle the listening
+// and processing of tcp connections
+type TCPTransport struct {
+	TCPTransportOpts
+	// Listener who will be responsible to accept the connection
+	listener net.Listener
+	rcpch    chan RPC
+}
+
+// NewTCPTransport initializes the tcp transporter with the handshake function
+// and the address to listen from
+func NewTCPTransport(opts TCPTransportOpts) *TCPTransport {
 	return &TCPTransport{
-		listenAddress: listenAddress,
+		TCPTransportOpts: opts,
+		rcpch:            make(chan RPC),
 	}
 }
 
+// Consume implements the Transport interface, which will return a read-only channel
+// for reading the incoming messages received from another peer.
+func (t *TCPTransport) Consume() <-chan RPC {
+	return t.rcpch
+}
+
+// ListenAndAccept with listen to the address given on the initialization of
+// the transport and start the accept loop
 func (t *TCPTransport) ListenAndAccept() (err error) {
-	t.listener, err = net.Listen("tcp", t.listenAddress)
+	t.listener, err = net.Listen("tcp", t.ListenAddress)
 	if err != nil {
 		return
 	}
@@ -37,9 +78,38 @@ func (t *TCPTransport) starAcceptLoop() {
 			fmt.Printf("TCP accept loop error: %s\n", err)
 		}
 
-		if err = conn.Close(); err != nil {
-			fmt.Printf("TCP conn close error: %s\n", err)
+		fmt.Printf("TCP new incoming connection: %s\n", conn)
+
+		go t.handleConn(conn)
+	}
+}
+
+func (t *TCPTransport) handleConn(conn net.Conn) {
+	var err error
+	defer func() {
+		fmt.Printf("Dropping peer connection: %+v\n", err)
+		conn.Close()
+	}()
+
+	peer := NewTCPPeer(conn, true)
+
+	if err = t.HandshakeFunc(peer); err != nil {
+		return
+	}
+
+	if t.OnPeer != nil {
+		if err = t.OnPeer(peer); err != nil {
+			return
+		}
+	}
+
+	rpc := RPC{}
+	for {
+		if err := t.Decoder.Decode(conn, &rpc); err != nil {
+			return
 		}
 
+		rpc.From = conn.RemoteAddr()
+		t.rcpch <- rpc
 	}
 }
