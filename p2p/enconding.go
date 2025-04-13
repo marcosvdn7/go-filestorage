@@ -25,5 +25,6 @@ func (dec DefaultDecoder) Decode(r io.Reader, m *Message) error {
 	}
 
 	m.Payload = buff[:n]
+
 	return nil
 }
