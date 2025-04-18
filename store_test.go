@@ -12,19 +12,16 @@ func TestCASPathTransformerFunc(t *testing.T) {
 	path := CASPathTransformerFunc(key)
 	expectedFileName := "3b2b11b7a4e96a07a1d668c44e3fd30e96a49764"
 	expectedPath := "3b2b1/1b7a4/e96a0/7a1d6/68c44/e3fd3/0e96a/49764"
-	//expectedPath1 := "3b2b11b7/a4e96a07/a1d668c4/4e3fd30e/96a49764"
 
 	assert.Equal(t, expectedPath, path.PathName)
 	assert.Equal(t, expectedFileName, path.FileName)
 }
 
 func TestDelete(t *testing.T) {
-	opts := StoreOpts{
-		PathTransformerFunc: CASPathTransformerFunc,
-	}
-	s := NewStore(opts)
+	s := newStore()
+	defer tearDown(t, s)
 
-	key := "myspecialpicture"
+	key := "somefile"
 	data := []byte("some jpg file")
 	err := s.writeStream(key, bytes.NewReader(data))
 	assert.Nil(t, err)
@@ -34,12 +31,10 @@ func TestDelete(t *testing.T) {
 }
 
 func TestStore(t *testing.T) {
-	opts := StoreOpts{
-		PathTransformerFunc: CASPathTransformerFunc,
-	}
-	s := NewStore(opts)
+	s := newStore()
+	defer tearDown(t, s)
 
-	key := "myspecialpicture"
+	key := "somefile"
 	data := []byte("some jpg file")
 	err := s.writeStream(key, bytes.NewReader(data))
 
@@ -55,4 +50,17 @@ func TestStore(t *testing.T) {
 
 	b, _ := io.ReadAll(r)
 	assert.Equal(t, string(data), string(b))
+}
+
+func newStore() *Store {
+	opts := StoreOpts{
+		PathTransformerFunc: CASPathTransformerFunc,
+	}
+	return NewStore(opts)
+}
+
+func tearDown(t *testing.T, s *Store) {
+	if err := s.Clear(); err != nil {
+		t.Error(err)
+	}
 }

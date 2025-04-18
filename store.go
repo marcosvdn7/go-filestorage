@@ -126,6 +126,10 @@ func (s *Store) Has(key string) (ok bool) {
 	return true
 }
 
+func (s *Store) Clear() error {
+	return os.RemoveAll(s.Root)
+}
+
 // writeStream receives the key, transforms into a pathName using the received
 // path transformer function, create the folders following the transformed path
 // and save the file (r Reader)
