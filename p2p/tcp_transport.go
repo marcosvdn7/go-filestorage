@@ -11,11 +11,11 @@ type TCPPeer struct {
 	conn net.Conn
 
 	// If we dial and retrieve a connection => outbound == true
-	// If we and accept and retrieve a connection => outbound == false
+	// If we accept and retrieve a connection => outbound == false
 	outbound bool
 }
 
-// Close implements the peer interface
+// Close implements the peer interface method Close()
 func (tp *TCPPeer) Close() error {
 	return tp.conn.Close()
 }
@@ -25,6 +25,7 @@ func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	return &TCPPeer{conn, outbound}
 }
 
+// TCPTransportOpts holds the options to initialize the transporter
 type TCPTransportOpts struct {
 	// Address which the transporter is going to listen from
 	ListenAddress string
@@ -41,7 +42,7 @@ type TCPTransport struct {
 	TCPTransportOpts
 	// Listener who will be responsible to accept the connection
 	listener net.Listener
-	rcpch    chan RPC
+	rpcChan  chan RPC
 }
 
 // NewTCPTransport initializes the tcp transporter with the handshake function
@@ -49,14 +50,14 @@ type TCPTransport struct {
 func NewTCPTransport(opts TCPTransportOpts) *TCPTransport {
 	return &TCPTransport{
 		TCPTransportOpts: opts,
-		rcpch:            make(chan RPC),
+		rpcChan:          make(chan RPC),
 	}
 }
 
 // Consume implements the Transport interface, which will return a read-only channel
 // for reading the incoming messages received from another peer.
 func (t *TCPTransport) Consume() <-chan RPC {
-	return t.rcpch
+	return t.rpcChan
 }
 
 // ListenAndAccept with listen to the address given on the initialization of
@@ -71,8 +72,10 @@ func (t *TCPTransport) ListenAndAccept() (err error) {
 	return
 }
 
+// starAcceptLoop accept and establish connection with listener
 func (t *TCPTransport) starAcceptLoop() {
 	for {
+		// Start the loop and accept the connection with the listener
 		conn, err := t.listener.Accept()
 		if err != nil {
 			fmt.Printf("TCP accept loop error: %s\n", err)
@@ -84,6 +87,8 @@ func (t *TCPTransport) starAcceptLoop() {
 	}
 }
 
+// handleConn defer the closing of the connection, create a new peer, calls the
+// handshake to see if connection is ok and calls the onPeer function.
 func (t *TCPTransport) handleConn(conn net.Conn) {
 	var err error
 	defer func() {
@@ -91,8 +96,9 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 		conn.Close()
 	}()
 
-	peer := NewTCPPeer(conn, true)
+	peer := NewTCPPeer(conn, false)
 
+	// Does a handshake with the peer to check if everything is ok with the connection
 	if err = t.HandshakeFunc(peer); err != nil {
 		return
 	}
@@ -103,13 +109,17 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 		}
 	}
 
+	// Create the struct containing the decoded payload and the sender address
 	rpc := RPC{}
 	for {
+		// Decode de data received from the connection
 		if err := t.Decoder.Decode(conn, &rpc); err != nil {
 			return
 		}
 
+		// Takes the remote address from the sender
 		rpc.From = conn.RemoteAddr()
-		t.rcpch <- rpc
+		// Put the data into the channel to be consumed
+		t.rpcChan <- rpc
 	}
 }

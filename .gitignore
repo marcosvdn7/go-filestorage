@@ -5,4 +5,7 @@
 .idea/
 
 # Temporary folders
-myspecialpicture/
+system-files/
+
+# Text files
+*.txt

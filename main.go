@@ -6,20 +6,27 @@ import (
 	"log"
 )
 
+func onPeer(p2p.Peer) error {
+	fmt.Println("Doing some logic with the peer outside of transporter")
+	return nil
+}
+
 func main() {
+	// Initialize the tcp transport configurations: Listen address, decoder, handshake and on peer function
 	tcpOpts := p2p.TCPTransportOpts{
 		ListenAddress: ":3000",
 		Decoder:       p2p.DefaultDecoder{},
 		HandshakeFunc: p2p.NOPHandshakeFunc,
-		OnPeer:        func(p2p.Peer) error { return fmt.Errorf("failed on peer func") },
+		OnPeer:        onPeer,
 	}
 
 	tcp := p2p.NewTCPTransport(tcpOpts)
 
+	// Create a go routine do consume the data being received in the TCPTransporter
 	go func() {
 		for {
 			msg := <-tcp.Consume()
-			fmt.Printf("Receveid msg %+v\n", msg)
+			fmt.Printf("Receveid msg: %s.\n", string(msg.Payload))
 		}
 	}()
 
