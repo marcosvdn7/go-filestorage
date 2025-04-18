@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"strings"
@@ -89,6 +88,10 @@ func NewStore(opts StoreOpts) *Store {
 	return &Store{StoreOpts: opts}
 }
 
+func (s *Store) Write(key string, r io.Reader) error {
+	return s.writeStream(key, r)
+}
+
 // Read returns a buffer with the data read from the received key
 func (s *Store) Read(key string) (io.Reader, error) {
 	f, err := s.readStream(key)
@@ -124,11 +127,7 @@ func (s *Store) Has(key string) (ok bool) {
 	pathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.fullPath())
 
 	_, err := os.Stat(pathWithRoot)
-	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		return false
-	}
-
-	return true
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 func (s *Store) Clear() error {
