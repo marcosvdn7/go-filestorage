@@ -95,7 +95,12 @@ func (s *Store) Read(key string) (io.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func(f io.ReadCloser) {
+		err := f.Close()
+		if err != nil {
+			log.Fatalf("Read error: error closing file: %s", err)
+		}
+	}(f)
 
 	buf := new(bytes.Buffer)
 	_, err = io.Copy(buf, f)
@@ -113,7 +118,7 @@ func (s *Store) Delete(key string) error {
 	return os.RemoveAll(firstPathWithRoot)
 }
 
-// Has verify if the path for the giving key exists
+// Has - verify if the path for the giving key exists
 func (s *Store) Has(key string) (ok bool) {
 	pathKey := s.PathTransformerFunc(key)
 	pathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.fullPath())
@@ -143,7 +148,12 @@ func (s *Store) writeStream(key string, r io.Reader) error {
 
 	// Crate the file in the transformed path
 	f, err := os.Create(fullPathWithRoot)
-	defer f.Close()
+	defer func(f *os.File) {
+		err := f.Close()
+		if err != nil {
+			log.Fatalf("Write error: error closing file: %s", err)
+		}
+	}(f)
 	if err != nil {
 		return err
 	}
