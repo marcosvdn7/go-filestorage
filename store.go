@@ -140,6 +140,7 @@ func (s *Store) Clear() error {
 func (s *Store) writeStream(key string, r io.Reader) error {
 	pathKey := s.PathTransformerFunc(key)                              // Transform the path with the provided key and function
 	pathNameWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.PathName) // Adds the root path
+
 	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil { // Creates all the folders using the giving path
 		return err
 	}

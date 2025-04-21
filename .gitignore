@@ -6,6 +6,7 @@
 
 # Temporary folders
 system-files/
+*_network/
 
 # Text files
 *.txt

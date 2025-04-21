@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"github.com/marcosvdn7/go-filestorage/p2p"
+	"io"
 	"log"
 	"sync"
 )
@@ -22,6 +25,11 @@ type FileServer struct {
 
 	store  *Store
 	quitCh chan struct{} // Empty struct channel to close the server
+}
+
+type Payload struct {
+	Key  string
+	Data []byte
 }
 
 func NewFileServer(opts FileServerOpts) *FileServer {
@@ -72,6 +80,35 @@ func (fs *FileServer) OnPeer(p p2p.Peer) error {
 	return nil
 }
 
+func (fs *FileServer) StoreData(key string, r io.Reader) error {
+	buf := new(bytes.Buffer)
+	tee := io.TeeReader(r, buf)
+
+	if err := fs.store.Write(key, tee); err != nil {
+		return err
+	}
+
+	p := &Payload{Key: key, Data: buf.Bytes()}
+
+	return fs.broadcast(p)
+}
+
+func (fs *FileServer) broadcast(p *Payload) error {
+	var peers []io.Writer
+	for _, peer := range fs.peers {
+		peers = append(peers, peer)
+	}
+
+	mw := io.MultiWriter(peers...)
+	encoder := gob.NewEncoder(mw)
+	encoded := encoder.Encode(p)
+
+	fmt.Println(string(p.Data))
+	fmt.Println(mw)
+
+	return encoded
+}
+
 // loop Creates the for/select responsible to handle the receiving messages
 func (fs *FileServer) loop() {
 	defer func() {
@@ -81,13 +118,18 @@ func (fs *FileServer) loop() {
 	for {
 		select {
 		case msg := <-fs.Transport.Consume():
-			fmt.Printf("Received message: %s\n", msg)
+			var p Payload
+			fmt.Printf("Received msg: %q\n", msg)
+			if err := gob.NewDecoder(bytes.NewReader(msg.Payload)).Decode(&p); err != nil {
+				log.Fatal(err)
+			}
 		case <-fs.quitCh:
 			return
 		}
 	}
 }
 
+// bootstrapNetwork dials and establish a connection with every node in the network
 func (fs *FileServer) bootstrapNetwork() error {
 	for _, addr := range fs.BootstrapNodes {
 		if len(addr) == 0 {
