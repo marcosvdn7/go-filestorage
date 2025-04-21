@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync"
 )
 
 // TCPPeer represents the remote node over a TCP established connection
@@ -15,11 +16,13 @@ type TCPPeer struct {
 	// If we dial and retrieve a connection => outbound == true
 	// If we accept and retrieve a connection => outbound == false
 	outbound bool
+
+	Wg *sync.WaitGroup
 }
 
 // NewTCPPeer initialize Peer with connection and outbound
 func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
-	return &TCPPeer{conn, outbound}
+	return &TCPPeer{conn, outbound, &sync.WaitGroup{}}
 }
 
 //// Close implements the Peer interface method Close()
@@ -151,8 +154,12 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 		}
 
 		// Takes the remote address from the sender
-		rpc.From = conn.RemoteAddr()
+		rpc.From = conn.RemoteAddr().String()
+		peer.Wg.Add(1)
+		fmt.Println("waiting til stream is done")
 		// Put the data into the channel to be consumed
 		t.rpcChan <- rpc
+		peer.Wg.Wait()
+		fmt.Println("stream done")
 	}
 }

@@ -88,7 +88,7 @@ func NewStore(opts StoreOpts) *Store {
 	return &Store{StoreOpts: opts}
 }
 
-func (s *Store) Write(key string, r io.Reader) error {
+func (s *Store) Write(key string, r io.Reader) (int64, error) {
 	return s.writeStream(key, r)
 }
 
@@ -137,12 +137,12 @@ func (s *Store) Clear() error {
 // writeStream receives the key, transforms into a pathName using the received
 // path transformer function, create the folders following the transformed path
 // and save the file (r Reader)
-func (s *Store) writeStream(key string, r io.Reader) error {
+func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
 	pathKey := s.PathTransformerFunc(key)                              // Transform the path with the provided key and function
 	pathNameWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.PathName) // Adds the root path
 
 	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil { // Creates all the folders using the giving path
-		return err
+		return 0, err
 	}
 	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.fullPath())
 
@@ -155,7 +155,7 @@ func (s *Store) writeStream(key string, r io.Reader) error {
 		}
 	}(f)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Copy the data received in r to the created file
@@ -166,7 +166,7 @@ func (s *Store) writeStream(key string, r io.Reader) error {
 
 	log.Printf("%d bytes writen to %s", n, fullPathWithRoot)
 
-	return nil
+	return n, nil
 }
 
 // readStream returns the file saved on the transformed path from the receiving key
