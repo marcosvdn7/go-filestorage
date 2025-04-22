@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/marcosvdn7/go-filestorage/p2p"
 	"log"
 	"strings"
@@ -16,8 +17,6 @@ func main() {
 		log.Fatal(s1.Start())
 	}()
 
-	data := bytes.NewReader([]byte("my big data file here!"))
-	
 	time.Sleep(1 * time.Second)
 
 	go func() {
@@ -27,8 +26,13 @@ func main() {
 		}
 	}()
 	time.Sleep(1 * time.Second)
-	if err := s2.StoreData("myprivatedata", data); err != nil {
-		log.Fatal(err)
+
+	for i := 0; i < 10; i++ {
+		data := bytes.NewReader([]byte("my big data file here!"))
+		if err := s2.Store(fmt.Sprintf("myprivatedata_%d", i), data); err != nil {
+			log.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	select {}
