@@ -23,7 +23,7 @@ func TestDelete(t *testing.T) {
 
 	key := "somefile"
 	data := []byte("some jpg file")
-	err := s.writeStream(key, bytes.NewReader(data))
+	_, err := s.writeStream(key, bytes.NewReader(data))
 	assert.Nil(t, err)
 
 	err = s.Delete(key)
@@ -36,7 +36,7 @@ func TestStore(t *testing.T) {
 
 	key := "somefile"
 	data := []byte("some jpg file")
-	err := s.writeStream(key, bytes.NewReader(data))
+	_, err := s.writeStream(key, bytes.NewReader(data))
 
 	assert.Nil(t, err)
 
@@ -45,7 +45,7 @@ func TestStore(t *testing.T) {
 	assert.Nil(t, err)
 	assert.True(t, ok)
 
-	r, err := s.Read(key)
+	_, r, err := s.Read(key)
 	assert.Nil(t, err)
 
 	b, _ := io.ReadAll(r)

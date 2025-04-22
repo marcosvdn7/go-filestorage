@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
@@ -93,22 +92,8 @@ func (s *Store) Write(key string, r io.Reader) (int64, error) {
 }
 
 // Read returns a buffer with the data read from the received key
-func (s *Store) Read(key string) (io.Reader, error) {
-	f, err := s.readStream(key)
-	if err != nil {
-		return nil, err
-	}
-	defer func(f io.ReadCloser) {
-		err := f.Close()
-		if err != nil {
-			log.Fatalf("Read error: error closing file: %s", err)
-		}
-	}(f)
-
-	buf := new(bytes.Buffer)
-	_, err = io.Copy(buf, f)
-
-	return buf, err
+func (s *Store) Read(key string) (int64, io.Reader, error) {
+	return s.readStream(key)
 }
 
 func (s *Store) Delete(key string) error {
@@ -148,28 +133,39 @@ func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
 
 	// Crate the file in the transformed path
 	f, err := os.Create(fullPathWithRoot)
+	if err != nil {
+		return 0, err
+	}
 	defer func(f *os.File) {
 		err := f.Close()
 		if err != nil {
 			log.Fatalf("Write error: error closing file: %s", err)
 		}
 	}(f)
-	if err != nil {
-		return 0, err
-	}
-
 	// Copy the data received in r to the created file
 	n, err := io.Copy(f, r)
 	if err != nil {
 		fmt.Println(err)
+		return 0, err
 	}
 
 	return n, nil
 }
 
 // readStream returns the file saved on the transformed path from the receiving key
-func (s *Store) readStream(key string) (io.ReadCloser, error) {
+func (s *Store) readStream(key string) (int64, io.ReadCloser, error) {
 	pathKey := s.PathTransformerFunc(key)
 	pathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.fullPath())
-	return os.Open(pathWithRoot)
+
+	f, err := os.Open(pathWithRoot)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	fileInfo, err := f.Stat()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return fileInfo.Size(), f, nil
 }

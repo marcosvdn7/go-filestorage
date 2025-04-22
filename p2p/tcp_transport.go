@@ -40,8 +40,8 @@ func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 //	return tp.conn.RemoteAddr()
 //}
 
-func (tp *TCPPeer) Send(data []byte) error {
-	_, err := tp.Conn.Write(data)
+func (p *TCPPeer) Send(data []byte) error {
+	_, err := p.Conn.Write(data)
 	return err
 }
 
@@ -167,9 +167,8 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 
 		if rpc.Stream {
 			peer.wg.Add(1)
-			fmt.Printf("Incoming stream from %s. Wating...\n", rpc.From)
+			fmt.Printf("[%s] incoming stream, waiting...\n", rpc.From)
 			peer.wg.Wait()
-			fmt.Printf("Stream from %s closed. Resuming read loop\n", rpc.From)
 			continue
 		}
 

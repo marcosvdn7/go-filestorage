@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/marcosvdn7/go-filestorage/p2p"
+	"io"
 	"log"
 	"strings"
 	"time"
@@ -16,26 +16,23 @@ func main() {
 	go func() {
 		log.Fatal(s1.Start())
 	}()
-
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	go func() {
-		err := s2.Start()
-		if err != nil {
-			log.Fatal(err)
-		}
+		log.Fatal(s2.Start())
 	}()
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
+	//data := bytes.NewReader([]byte("my big data file here!"))
+	//s2.Store("coolpicture.jpg", data)
 
-	for i := 0; i < 10; i++ {
-		data := bytes.NewReader([]byte("my big data file here!"))
-		if err := s2.Store(fmt.Sprintf("myprivatedata_%d", i), data); err != nil {
-			log.Fatal(err)
-		}
-		time.Sleep(5 * time.Millisecond)
+	r, err := s2.Get("coolpicture.jpg")
+	if err != nil {
+		log.Fatal(err)
 	}
+	b, err := io.ReadAll(r)
 
-	select {}
+	fmt.Println(string(b))
+	//select {}
 }
 
 func makeServer(listenAddr string, nodes ...string) *FileServer {
