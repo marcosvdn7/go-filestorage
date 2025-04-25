@@ -1,10 +1,14 @@
 package p2p
 
-import "net"
+const (
+	IncomingMessage = 0x1
+	IncomingStream  = 0x2
+)
 
 // RPC holds any data that is being transported between two
 // nodes in the network
 type RPC struct {
-	From    net.Addr
+	From    string
 	Payload []byte
+	Stream  bool
 }

@@ -1,13 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"github.com/marcosvdn7/go-filestorage/p2p"
+	"io"
 	"log"
 	"sync"
+	"time"
 )
 
 type FileServerOpts struct {
+	EncryptionKey       []byte
 	StorageRoot         string              // Root folder where the store is going to save the files
 	PathTransformerFunc PathTransformerFunc // Transformer func to implement how the folders are going to be organized
 	Transport           p2p.Transport
@@ -22,6 +28,20 @@ type FileServer struct {
 
 	store  *Store
 	quitCh chan struct{} // Empty struct channel to close the server
+}
+
+type Message struct {
+	//From    string
+	Payload any
+}
+
+type MessageStoreFile struct {
+	Key  string
+	Size int64
+}
+
+type MessageGetFile struct {
+	Key string
 }
 
 func NewFileServer(opts FileServerOpts) *FileServer {
@@ -40,6 +60,7 @@ func NewFileServer(opts FileServerOpts) *FileServer {
 
 // Start calls the giving transporter listen and accept function to start listening to a server
 func (fs *FileServer) Start() error {
+	fs.init()
 	if err := fs.Transport.ListenAndAccept(); err != nil {
 		return err
 	}
@@ -72,22 +93,208 @@ func (fs *FileServer) OnPeer(p p2p.Peer) error {
 	return nil
 }
 
+func (fs *FileServer) Store(key string, r io.Reader) error {
+	var (
+		fileBuffer = new(bytes.Buffer)
+		tee        = io.TeeReader(r, fileBuffer)
+	)
+
+	size, err := fs.store.Write(key, tee)
+	if err != nil {
+		return err
+	}
+	msg := Message{
+		Payload: MessageStoreFile{
+			Key:  key,
+			Size: size + 16,
+		},
+	}
+
+	if err := fs.broadcast(&msg); err != nil {
+		return err
+	}
+
+	time.Sleep(time.Millisecond * 5)
+
+	var peers []io.Writer
+	for _, peer := range fs.peers {
+		peers = append(peers, peer)
+	}
+	mw := io.MultiWriter(peers...)
+	if _, err = mw.Write([]byte{p2p.IncomingStream}); err != nil {
+		return err
+	}
+	n, err := CopyEncrypt(fs.EncryptionKey, fileBuffer, mw)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("[%s] received and writter (%d) bytes to disk\n", fs.Transport.Addr(), n)
+
+	return nil
+}
+
+func (fs *FileServer) Get(key string) (io.Reader, error) {
+	if fs.store.Has(key) {
+		fmt.Printf("[%s] serving file (%s) from local disk\n", fs.Transport.Addr(), key)
+		_, r, err := fs.store.Read(key)
+		return r, err
+	}
+
+	fmt.Printf("[%s] don't have file (%s) locally, fetching from network\n", fs.Transport.Addr(), key)
+
+	msg := Message{
+		Payload: MessageGetFile{
+			Key: key,
+		},
+	}
+
+	if err := fs.broadcast(&msg); err != nil {
+		return nil, err
+	}
+
+	time.Sleep(time.Millisecond * 500)
+
+	for _, peer := range fs.peers {
+		// First read the file size so we can limit the amount of bytes that we read from the connection
+		// so it will not keep hanging
+		var fileSize int64
+		if err := binary.Read(peer, binary.LittleEndian, &fileSize); err != nil {
+			return nil, err
+		}
+		n, err := fs.store.WriteDecrypt(fs.EncryptionKey, key, io.LimitReader(peer, fileSize))
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("[%s] received %d bytes from peer (%s)\n", fs.Transport.Addr(), n, peer.RemoteAddr().String())
+
+		peer.CloseStream()
+	}
+	_, r, err := fs.store.Read(key)
+
+	return r, err
+}
+
+func (fs *FileServer) stream(msg *Message) error {
+	var peers []io.Writer
+	for _, peer := range fs.peers {
+		peers = append(peers, peer)
+	}
+
+	mw := io.MultiWriter(peers...)
+	return gob.NewEncoder(mw).Encode(msg)
+}
+
+func (fs *FileServer) broadcast(msg *Message) error {
+	buf := new(bytes.Buffer)
+	if err := gob.NewEncoder(buf).Encode(msg); err != nil {
+		return err
+	}
+
+	for _, peer := range fs.peers {
+		if err := peer.Send([]byte{p2p.IncomingMessage}); err != nil {
+			return err
+		}
+		if err := peer.Send(buf.Bytes()); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // loop Creates the for/select responsible to handle the receiving messages
 func (fs *FileServer) loop() {
 	defer func() {
-		log.Println("file server stopped due to user action")
+		log.Println("file server stopped due to error or user action")
 		fs.Transport.Close()
 	}()
 	for {
 		select {
-		case msg := <-fs.Transport.Consume():
-			fmt.Printf("Received message: %s\n", msg)
+		case rpc := <-fs.Transport.Consume():
+			var msg Message
+			if err := gob.NewDecoder(bytes.NewReader(rpc.Payload)).Decode(&msg); err != nil {
+				fmt.Printf("Error decoding received message: %s\n", err)
+			}
+
+			if err := fs.handleMessage(rpc.From, &msg); err != nil {
+				fmt.Printf("Error handling message: %s\n", err)
+			}
 		case <-fs.quitCh:
 			return
 		}
 	}
 }
 
+func (fs *FileServer) handleMessage(from string, msg *Message) error {
+	switch v := msg.Payload.(type) {
+	case MessageStoreFile:
+		return fs.handleMessageStoreFile(from, v)
+	case MessageGetFile:
+		return fs.handleMessageGetFile(from, &v)
+	}
+	return nil
+}
+
+func (fs *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) error {
+	peer, ok := fs.peers[from]
+	if !ok {
+		return fmt.Errorf("peer %s not found in the peer map", from)
+	}
+
+	n, err := fs.store.Write(msg.Key, io.LimitReader(peer, msg.Size))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("[%s] writen %d bytes to disk\n", fs.Transport.Addr(), n)
+
+	peer.CloseStream()
+	fmt.Printf("[%s] stream close, resuming read loop\n", peer.RemoteAddr().String())
+
+	return nil
+}
+
+func (fs *FileServer) handleMessageGetFile(from string, msg *MessageGetFile) error {
+	if !fs.store.Has(msg.Key) {
+		return fmt.Errorf("[%s] need to serve file %s but it does not exist on disk", fs.Transport.Addr(), msg.Key)
+	}
+
+	fmt.Printf("[%s] serving file (%s) over the network\n", fs.Transport.Addr(), msg.Key)
+
+	fileSize, r, err := fs.store.Read(msg.Key)
+	if err != nil {
+		return err
+	}
+
+	if rc, ok := r.(io.ReadCloser); ok {
+		defer rc.Close()
+	}
+
+	peer, ok := fs.peers[from]
+	if !ok {
+		return fmt.Errorf("[%s] peer %s not found in the peer map", fs.Transport.Addr(), from)
+	}
+
+	// First send the "incomingStream" byte to the peer, and then we can send
+	// the file fileSize as an int64
+	if err := peer.Send([]byte{p2p.IncomingStream}); err != nil {
+		return err
+	}
+	if err := binary.Write(peer, binary.LittleEndian, &fileSize); err != nil {
+		return err
+	}
+
+	n, err := io.Copy(peer, r)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("[%s] written %d bytes over the network to %s\n", fs.Transport.Addr(), n, from)
+
+	return nil
+}
+
+// bootstrapNetwork dials and establish a connection with every node in the network
 func (fs *FileServer) bootstrapNetwork() error {
 	for _, addr := range fs.BootstrapNodes {
 		if len(addr) == 0 {
@@ -101,4 +308,9 @@ func (fs *FileServer) bootstrapNetwork() error {
 	}
 
 	return nil
+}
+
+func (fs *FileServer) init() {
+	gob.Register(MessageStoreFile{})
+	gob.Register(MessageGetFile{})
 }

@@ -5,36 +5,43 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync"
 )
 
 // TCPPeer represents the remote node over a TCP established connection
 type TCPPeer struct {
-	// Underlying connection of the peer
-	conn net.Conn
+	// Underlying connection of the peer. In this case, a TCP connectoin
+	net.Conn
 
 	// If we dial and retrieve a connection => outbound == true
 	// If we accept and retrieve a connection => outbound == false
 	outbound bool
+
+	wg *sync.WaitGroup
+}
+
+func (p *TCPPeer) CloseStream() {
+	p.wg.Done()
 }
 
 // NewTCPPeer initialize Peer with connection and outbound
 func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
-	return &TCPPeer{conn, outbound}
+	return &TCPPeer{conn, outbound, &sync.WaitGroup{}}
 }
 
-// Close implements the Peer interface method Close()
-func (tp *TCPPeer) Close() error {
-	return tp.conn.Close()
-}
+//// Close implements the Peer interface method Close()
+//func (tp *TCPPeer) Close() error {
+//	return tp.conn.Close()
+//}
+//
+//// RemoteAddr implements the Peer interface method RemoteAddr()
+//// it will return the remote address of its underlying connection
+//func (tp *TCPPeer) RemoteAddr() net.Addr {
+//	return tp.conn.RemoteAddr()
+//}
 
-// RemoteAddr implements the Peer interface method RemoteAddr()
-// it will return the remote address of its underlying connection
-func (tp *TCPPeer) RemoteAddr() net.Addr {
-	return tp.conn.RemoteAddr()
-}
-
-func (tp *TCPPeer) Send(data []byte) error {
-	_, err := tp.conn.Write(data)
+func (p *TCPPeer) Send(data []byte) error {
+	_, err := p.Conn.Write(data)
 	return err
 }
 
@@ -63,8 +70,14 @@ type TCPTransport struct {
 func NewTCPTransport(opts TCPTransportOpts) *TCPTransport {
 	return &TCPTransport{
 		TCPTransportOpts: opts,
-		rpcChan:          make(chan RPC),
+		rpcChan:          make(chan RPC, 1024),
 	}
+}
+
+// Addr implements the Transport interface return the address the transport
+// is accepting connections
+func (t *TCPTransport) Addr() string {
+	return t.ListenAddress
 }
 
 // Consume implements the Transport interface, which will return a read-only channel
@@ -143,15 +156,22 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool) {
 	}
 
 	// Create the struct containing the decoded payload and the sender address
-	rpc := RPC{}
 	for {
+		rpc := RPC{}
 		// Decode de data received from the connection
 		if err := t.Decoder.Decode(conn, &rpc); err != nil {
 			return
 		}
-
 		// Takes the remote address from the sender
-		rpc.From = conn.RemoteAddr()
+		rpc.From = conn.RemoteAddr().String()
+
+		if rpc.Stream {
+			peer.wg.Add(1)
+			fmt.Printf("[%s] incoming stream, waiting...\n", rpc.From)
+			peer.wg.Wait()
+			continue
+		}
+
 		// Put the data into the channel to be consumed
 		t.rpcChan <- rpc
 	}
