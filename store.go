@@ -91,6 +91,17 @@ func (s *Store) Write(key string, r io.Reader) (int64, error) {
 	return s.writeStream(key, r)
 }
 
+func (s *Store) WriteDecrypt(encryptedKey []byte, key string, r io.Reader) (int64, error) {
+	f, err := s.openFileForWriting(key)
+	if err != nil {
+		return 0, err
+	}
+	defer closeFile(f)
+	// Copy the data received in r to the created file
+	n, err := copyDecrypt(encryptedKey, r, f)
+	return int64(n), err
+}
+
 // Read returns a buffer with the data read from the received key
 func (s *Store) Read(key string) (int64, io.Reader, error) {
 	return s.readStream(key)
@@ -99,7 +110,7 @@ func (s *Store) Read(key string) (int64, io.Reader, error) {
 func (s *Store) Delete(key string) error {
 	pathKey := s.PathTransformerFunc(key)
 
-	defer fmt.Printf("%s deleted from disk", pathKey.FileName)
+	defer fmt.Printf("%s deleted from disk\n", pathKey.FileName)
 
 	firstPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.firstPathName())
 
@@ -123,33 +134,13 @@ func (s *Store) Clear() error {
 // path transformer function, create the folders following the transformed path
 // and save the file (r Reader)
 func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
-	pathKey := s.PathTransformerFunc(key)                              // Transform the path with the provided key and function
-	pathNameWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.PathName) // Adds the root path
-
-	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil { // Creates all the folders using the giving path
-		return 0, err
-	}
-	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.fullPath())
-
-	// Crate the file in the transformed path
-	f, err := os.Create(fullPathWithRoot)
+	f, err := s.openFileForWriting(key)
 	if err != nil {
 		return 0, err
 	}
-	defer func(f *os.File) {
-		err := f.Close()
-		if err != nil {
-			log.Fatalf("Write error: error closing file: %s", err)
-		}
-	}(f)
+	defer closeFile(f)
 	// Copy the data received in r to the created file
-	n, err := io.Copy(f, r)
-	if err != nil {
-		fmt.Println(err)
-		return 0, err
-	}
-
-	return n, nil
+	return io.Copy(f, r)
 }
 
 // readStream returns the file saved on the transformed path from the receiving key
@@ -168,4 +159,24 @@ func (s *Store) readStream(key string) (int64, io.ReadCloser, error) {
 	}
 
 	return fileInfo.Size(), f, nil
+}
+
+func (s *Store) openFileForWriting(key string) (*os.File, error) {
+	pathKey := s.PathTransformerFunc(key)                              // Transform the path with the provided key and function
+	pathNameWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.PathName) // Adds the root path
+
+	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil { // Creates all the folders using the giving path
+		return nil, err
+	}
+	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.fullPath())
+
+	// Create the file in the transformed path
+	return os.Create(fullPathWithRoot)
+}
+
+func closeFile(f *os.File) {
+	err := f.Close()
+	if err != nil {
+		log.Fatalf("Write error: error closing file: %s", err)
+	}
 }

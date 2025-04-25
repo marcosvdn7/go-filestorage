@@ -114,20 +114,22 @@ func (fs *FileServer) Store(key string, r io.Reader) error {
 		return err
 	}
 
-	time.Sleep(time.Millisecond * 3)
+	time.Sleep(time.Millisecond * 5)
 
-	// TODO: (@marcosvd7) use a multi writer here
+	var peers []io.Writer
 	for _, peer := range fs.peers {
-		if err := peer.Send([]byte{p2p.IncomingStream}); err != nil {
-			return err
-		}
-		n, err := CopyEncrypt(fs.EncryptionKey, fileBuffer, peer)
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("%d bytes copied to peer %s\n", n, peer.RemoteAddr().String())
+		peers = append(peers, peer)
 	}
+	mw := io.MultiWriter(peers...)
+	if _, err = mw.Write([]byte{p2p.IncomingStream}); err != nil {
+		return err
+	}
+	n, err := CopyEncrypt(fs.EncryptionKey, fileBuffer, mw)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("[%s] received and writter (%d) bytes to disk\n", fs.Transport.Addr(), n)
 
 	return nil
 }
@@ -154,16 +156,13 @@ func (fs *FileServer) Get(key string) (io.Reader, error) {
 	time.Sleep(time.Millisecond * 500)
 
 	for _, peer := range fs.peers {
-		//if err := peer.SetReadDeadline(time.Now().Add(time.Second * 5)); err != nil {
-		//	return nil, err
-		//}
 		// First read the file size so we can limit the amount of bytes that we read from the connection
 		// so it will not keep hanging
 		var fileSize int64
 		if err := binary.Read(peer, binary.LittleEndian, &fileSize); err != nil {
 			return nil, err
 		}
-		n, err := fs.store.Write(key, io.LimitReader(peer, fileSize))
+		n, err := fs.store.WriteDecrypt(fs.EncryptionKey, key, io.LimitReader(peer, fileSize))
 		if err != nil {
 			return nil, err
 		}

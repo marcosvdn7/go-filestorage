@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"log"
 )
@@ -20,6 +21,7 @@ func newEncryptionKey() []byte {
 func copyDecrypt(key []byte, src io.Reader, dst io.Writer) (int, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
+		fmt.Printf("error decrypting key: %v\n", err)
 		return 0, err
 	}
 
