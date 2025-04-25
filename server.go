@@ -13,6 +13,7 @@ import (
 )
 
 type FileServerOpts struct {
+	EncryptionKey       []byte
 	StorageRoot         string              // Root folder where the store is going to save the files
 	PathTransformerFunc PathTransformerFunc // Transformer func to implement how the folders are going to be organized
 	Transport           p2p.Transport
@@ -105,7 +106,7 @@ func (fs *FileServer) Store(key string, r io.Reader) error {
 	msg := Message{
 		Payload: MessageStoreFile{
 			Key:  key,
-			Size: size,
+			Size: size + 16,
 		},
 	}
 
@@ -114,12 +115,13 @@ func (fs *FileServer) Store(key string, r io.Reader) error {
 	}
 
 	time.Sleep(time.Millisecond * 3)
+
 	// TODO: (@marcosvd7) use a multi writer here
 	for _, peer := range fs.peers {
 		if err := peer.Send([]byte{p2p.IncomingStream}); err != nil {
 			return err
 		}
-		n, err := io.Copy(peer, fileBuffer)
+		n, err := CopyEncrypt(fs.EncryptionKey, fileBuffer, peer)
 		if err != nil {
 			return err
 		}
@@ -266,7 +268,6 @@ func (fs *FileServer) handleMessageGetFile(from string, msg *MessageGetFile) err
 	}
 
 	if rc, ok := r.(io.ReadCloser); ok {
-		fmt.Println("Closing readClose")
 		defer rc.Close()
 	}
 

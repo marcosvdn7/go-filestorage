@@ -32,7 +32,7 @@ func main() {
 	b, err := io.ReadAll(r)
 
 	fmt.Println(string(b))
-	//select {}
+	select {}
 }
 
 func makeServer(listenAddr string, nodes ...string) *FileServer {
