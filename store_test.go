@@ -50,6 +50,7 @@ func TestStore(t *testing.T) {
 
 	b, _ := io.ReadAll(r)
 	assert.Equal(t, string(data), string(b))
+
 }
 
 func newStore() *Store {

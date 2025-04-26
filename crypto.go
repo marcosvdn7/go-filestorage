@@ -3,11 +3,27 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/md5"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 )
+
+func generateID() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, buf); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(buf), nil
+}
+
+func hashKey(key string) string {
+	hash := md5.Sum([]byte(key))
+	return hex.EncodeToString(hash[:])
+}
 
 func newEncryptionKey() []byte {
 	keyBuf := make([]byte, 32)
@@ -16,6 +32,32 @@ func newEncryptionKey() []byte {
 	}
 
 	return keyBuf
+}
+
+func copyStream(stream cipher.Stream, blockSize int, dst io.Writer, src io.Reader) (int, error) {
+	var (
+		buf          = make([]byte, 32*1024)
+		bytesWritten = blockSize
+	)
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			stream.XORKeyStream(buf, buf[:n])
+			nn, err := dst.Write(buf[:n])
+			if err != nil {
+				return 0, err
+			}
+			bytesWritten += nn
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	return bytesWritten, nil
 }
 
 func copyDecrypt(key []byte, src io.Reader, dst io.Writer) (int, error) {
@@ -32,32 +74,13 @@ func copyDecrypt(key []byte, src io.Reader, dst io.Writer) (int, error) {
 		return 0, err
 	}
 	var (
-		buf          = make([]byte, 32*1024)
 		stream       = cipher.NewCTR(block, iv)
 		bytesWritten = block.BlockSize()
 	)
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			stream.XORKeyStream(buf, buf[:n])
-			nn, err := dst.Write(buf[:n])
-			if err != nil {
-				return 0, err
-			}
-			bytesWritten += nn
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return 0, err
-		}
-	}
-
-	return bytesWritten, nil
+	return copyStream(stream, bytesWritten, dst, src)
 }
 
-func CopyEncrypt(key []byte, src io.Reader, dst io.Writer) (int, error) {
+func copyEncrypt(key []byte, src io.Reader, dst io.Writer) (int, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return 0, err
@@ -72,27 +95,8 @@ func CopyEncrypt(key []byte, src io.Reader, dst io.Writer) (int, error) {
 	}
 
 	var (
-		buf          = make([]byte, 32*1024)
 		stream       = cipher.NewCTR(block, iv)
 		bytesWritten = block.BlockSize()
 	)
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			stream.XORKeyStream(buf, buf[:n])
-			nn, err := dst.Write(buf[:n])
-			if err != nil {
-				return 0, err
-			}
-			bytesWritten += nn
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return 0, err
-		}
-	}
-
-	return bytesWritten, nil
+	return copyStream(stream, bytesWritten, dst, src)
 }

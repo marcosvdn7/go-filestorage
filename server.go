@@ -13,6 +13,7 @@ import (
 )
 
 type FileServerOpts struct {
+	ID                  string
 	EncryptionKey       []byte
 	StorageRoot         string              // Root folder where the store is going to save the files
 	PathTransformerFunc PathTransformerFunc // Transformer func to implement how the folders are going to be organized
@@ -36,11 +37,13 @@ type Message struct {
 }
 
 type MessageStoreFile struct {
+	ID   string
 	Key  string
 	Size int64
 }
 
 type MessageGetFile struct {
+	ID  string
 	Key string
 }
 
@@ -48,6 +51,10 @@ func NewFileServer(opts FileServerOpts) *FileServer {
 	storeOpts := StoreOpts{
 		Root:                opts.StorageRoot,
 		PathTransformerFunc: opts.PathTransformerFunc,
+	}
+
+	if len(opts.ID) == 0 {
+		opts.ID, _ = generateID()
 	}
 
 	return &FileServer{
@@ -99,13 +106,14 @@ func (fs *FileServer) Store(key string, r io.Reader) error {
 		tee        = io.TeeReader(r, fileBuffer)
 	)
 
-	size, err := fs.store.Write(key, tee)
+	size, err := fs.store.Write(fs.ID, key, tee)
 	if err != nil {
 		return err
 	}
 	msg := Message{
 		Payload: MessageStoreFile{
-			Key:  key,
+			ID:   fs.ID,
+			Key:  hashKey(key),
 			Size: size + 16,
 		},
 	}
@@ -124,7 +132,7 @@ func (fs *FileServer) Store(key string, r io.Reader) error {
 	if _, err = mw.Write([]byte{p2p.IncomingStream}); err != nil {
 		return err
 	}
-	n, err := CopyEncrypt(fs.EncryptionKey, fileBuffer, mw)
+	n, err := copyEncrypt(fs.EncryptionKey, fileBuffer, mw)
 	if err != nil {
 		return err
 	}
@@ -135,9 +143,9 @@ func (fs *FileServer) Store(key string, r io.Reader) error {
 }
 
 func (fs *FileServer) Get(key string) (io.Reader, error) {
-	if fs.store.Has(key) {
+	if fs.store.Has(fs.ID, key) {
 		fmt.Printf("[%s] serving file (%s) from local disk\n", fs.Transport.Addr(), key)
-		_, r, err := fs.store.Read(key)
+		_, r, err := fs.store.Read(fs.ID, key)
 		return r, err
 	}
 
@@ -145,7 +153,8 @@ func (fs *FileServer) Get(key string) (io.Reader, error) {
 
 	msg := Message{
 		Payload: MessageGetFile{
-			Key: key,
+			ID:  fs.ID,
+			Key: hashKey(key),
 		},
 	}
 
@@ -162,7 +171,7 @@ func (fs *FileServer) Get(key string) (io.Reader, error) {
 		if err := binary.Read(peer, binary.LittleEndian, &fileSize); err != nil {
 			return nil, err
 		}
-		n, err := fs.store.WriteDecrypt(fs.EncryptionKey, key, io.LimitReader(peer, fileSize))
+		n, err := fs.store.WriteDecrypt(fs.ID, key, fs.EncryptionKey, io.LimitReader(peer, fileSize))
 		if err != nil {
 			return nil, err
 		}
@@ -170,19 +179,9 @@ func (fs *FileServer) Get(key string) (io.Reader, error) {
 
 		peer.CloseStream()
 	}
-	_, r, err := fs.store.Read(key)
+	_, r, err := fs.store.Read(fs.ID, key)
 
 	return r, err
-}
-
-func (fs *FileServer) stream(msg *Message) error {
-	var peers []io.Writer
-	for _, peer := range fs.peers {
-		peers = append(peers, peer)
-	}
-
-	mw := io.MultiWriter(peers...)
-	return gob.NewEncoder(mw).Encode(msg)
 }
 
 func (fs *FileServer) broadcast(msg *Message) error {
@@ -242,7 +241,7 @@ func (fs *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) 
 		return fmt.Errorf("peer %s not found in the peer map", from)
 	}
 
-	n, err := fs.store.Write(msg.Key, io.LimitReader(peer, msg.Size))
+	n, err := fs.store.Write(msg.ID, msg.Key, io.LimitReader(peer, msg.Size))
 	if err != nil {
 		return err
 	}
@@ -255,13 +254,13 @@ func (fs *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) 
 }
 
 func (fs *FileServer) handleMessageGetFile(from string, msg *MessageGetFile) error {
-	if !fs.store.Has(msg.Key) {
+	if !fs.store.Has(msg.ID, msg.Key) {
 		return fmt.Errorf("[%s] need to serve file %s but it does not exist on disk", fs.Transport.Addr(), msg.Key)
 	}
 
 	fmt.Printf("[%s] serving file (%s) over the network\n", fs.Transport.Addr(), msg.Key)
 
-	fileSize, r, err := fs.store.Read(msg.Key)
+	fileSize, r, err := fs.store.Read(msg.ID, msg.Key)
 	if err != nil {
 		return err
 	}
@@ -301,8 +300,9 @@ func (fs *FileServer) bootstrapNetwork() error {
 			continue
 		}
 		go func(addr string) {
+			fmt.Printf("[%s] atempting to connect with remote %s\n", fs.Transport.Addr(), addr)
 			if err := fs.Transport.Dial(addr); err != nil {
-				log.Printf("dial error: %s\n", err)
+				log.Printf("[%s] dial error: %s\n", fs.Transport.Addr(), err)
 			}
 		}(addr)
 	}

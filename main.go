@@ -33,13 +33,13 @@ func main() {
 	for i := 0; i <= 20; i++ {
 		key := fmt.Sprintf("picture_%d.jpg", i)
 		data := bytes.NewReader([]byte("my big data file here!"))
-		s2.Store(key, data)
+		s3.Store(key, data)
 
-		if err := s2.store.Delete(key); err != nil {
+		if err := s3.store.Delete(s3.ID, key); err != nil {
 			log.Fatal(err)
 		}
 
-		r, err := s2.Get(key)
+		r, err := s3.Get(key)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -15,7 +15,7 @@ func TestCopyEncrypt(t *testing.T) {
 		key     = newEncryptionKey()
 	)
 
-	n, err := CopyEncrypt(key, src, dst)
+	n, err := copyEncrypt(key, src, dst)
 	assert.Nil(t, err)
 	assert.Zero(t, n)
 

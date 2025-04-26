@@ -87,12 +87,12 @@ func NewStore(opts StoreOpts) *Store {
 	return &Store{StoreOpts: opts}
 }
 
-func (s *Store) Write(key string, r io.Reader) (int64, error) {
-	return s.writeStream(key, r)
+func (s *Store) Write(id, key string, r io.Reader) (int64, error) {
+	return s.writeStream(id, key, r)
 }
 
-func (s *Store) WriteDecrypt(encryptedKey []byte, key string, r io.Reader) (int64, error) {
-	f, err := s.openFileForWriting(key)
+func (s *Store) WriteDecrypt(id, key string, encryptedKey []byte, r io.Reader) (int64, error) {
+	f, err := s.openFileForWriting(id, key)
 	if err != nil {
 		return 0, err
 	}
@@ -103,24 +103,24 @@ func (s *Store) WriteDecrypt(encryptedKey []byte, key string, r io.Reader) (int6
 }
 
 // Read returns a buffer with the data read from the received key
-func (s *Store) Read(key string) (int64, io.Reader, error) {
-	return s.readStream(key)
+func (s *Store) Read(id, key string) (int64, io.Reader, error) {
+	return s.readStream(id, key)
 }
 
-func (s *Store) Delete(key string) error {
+func (s *Store) Delete(id, key string) error {
 	pathKey := s.PathTransformerFunc(key)
 
 	defer fmt.Printf("%s deleted from disk\n", pathKey.FileName)
 
-	firstPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.firstPathName())
+	firstPathWithRoot := fmt.Sprintf("%s/%s/%s", s.Root, id, pathKey.firstPathName())
 
 	return os.RemoveAll(firstPathWithRoot)
 }
 
 // Has - verify if the path for the giving key exists
-func (s *Store) Has(key string) (ok bool) {
+func (s *Store) Has(id, key string) (ok bool) {
 	pathKey := s.PathTransformerFunc(key)
-	pathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.fullPath())
+	pathWithRoot := fmt.Sprintf("%s/%s/%s", s.Root, id, pathKey.fullPath())
 
 	_, err := os.Stat(pathWithRoot)
 	return !errors.Is(err, os.ErrNotExist)
@@ -133,8 +133,8 @@ func (s *Store) Clear() error {
 // writeStream receives the key, transforms into a pathName using the received
 // path transformer function, create the folders following the transformed path
 // and save the file (r Reader)
-func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
-	f, err := s.openFileForWriting(key)
+func (s *Store) writeStream(id, key string, r io.Reader) (int64, error) {
+	f, err := s.openFileForWriting(id, key)
 	if err != nil {
 		return 0, err
 	}
@@ -144,9 +144,9 @@ func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
 }
 
 // readStream returns the file saved on the transformed path from the receiving key
-func (s *Store) readStream(key string) (int64, io.ReadCloser, error) {
+func (s *Store) readStream(id, key string) (int64, io.ReadCloser, error) {
 	pathKey := s.PathTransformerFunc(key)
-	pathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.fullPath())
+	pathWithRoot := fmt.Sprintf("%s/%s/%s", s.Root, id, pathKey.fullPath())
 
 	f, err := os.Open(pathWithRoot)
 	if err != nil {
@@ -161,14 +161,14 @@ func (s *Store) readStream(key string) (int64, io.ReadCloser, error) {
 	return fileInfo.Size(), f, nil
 }
 
-func (s *Store) openFileForWriting(key string) (*os.File, error) {
-	pathKey := s.PathTransformerFunc(key)                              // Transform the path with the provided key and function
-	pathNameWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.PathName) // Adds the root path
+func (s *Store) openFileForWriting(id, key string) (*os.File, error) {
+	pathKey := s.PathTransformerFunc(key)                                     // Transform the path with the provided key and function
+	pathNameWithRoot := fmt.Sprintf("%s/%s/%s", s.Root, id, pathKey.PathName) // Adds the root path
 
 	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil { // Creates all the folders using the giving path
 		return nil, err
 	}
-	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.fullPath())
+	fullPathWithRoot := fmt.Sprintf("%s/%s/%s", s.Root, id, pathKey.fullPath())
 
 	// Create the file in the transformed path
 	return os.Create(fullPathWithRoot)
